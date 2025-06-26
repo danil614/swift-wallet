@@ -3,8 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,8 +14,6 @@ var (
 	ErrInsufficientFunds = errors.New("insufficient funds")
 	ErrUnknownOperation  = errors.New("unknown operation")
 )
-
-const maxRetry = 5
 
 type Repository interface {
 	GetBalance(ctx context.Context, id uuid.UUID) (int64, error)
@@ -45,66 +41,36 @@ func (r *repo) GetBalance(ctx context.Context, id uuid.UUID) (int64, error) {
 
 func (r *repo) ChangeBalance(ctx context.Context, id uuid.UUID, op model.OperationType, amount int64) (int64, error) {
 	var (
+		sql string
 		bal int64
-		err error
 	)
 
-	for i := 0; i < maxRetry; i++ {
-		bal, err = r.changeOnce(ctx, id, op, amount)
-		if err != nil && isSerializationErr(err) {
-			time.Sleep(time.Duration(i+1) * 25 * time.Millisecond)
-			continue
-		}
-		break
-	}
-	return bal, err
-}
-
-func (r *repo) changeOnce(ctx context.Context, id uuid.UUID, op model.OperationType, amount int64) (int64, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback(ctx)
-
-	// блокируем строку
-	var current int64
-	err = tx.QueryRow(ctx, `SELECT balance FROM wallets WHERE id=$1 FOR UPDATE`, id).Scan(&current)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNotFound
-	}
-	if err != nil {
-		return 0, err
-	}
-
-	var newBal int64
 	switch op {
 	case model.Deposit:
-		newBal = current + amount
+		sql = `UPDATE wallets
+                  SET balance   = balance + $1,
+                      updated_at = now()
+                WHERE id = $2
+            RETURNING balance`
+
 	case model.Withdraw:
-		if current < amount {
-			return 0, ErrInsufficientFunds
-		}
-		newBal = current - amount
+		sql = `UPDATE wallets
+                  SET balance   = balance - $1,
+                      updated_at = now()
+                WHERE id = $2
+                  AND balance  >= $1
+            RETURNING balance`
+
 	default:
 		return 0, ErrUnknownOperation
 	}
 
-	if _, err = tx.Exec(ctx,
-		`UPDATE wallets SET balance=$1, updated_at=now() WHERE id=$2`, newBal, id); err != nil {
-		return 0, err
+	err := r.db.QueryRow(ctx, sql, amount, id).Scan(&bal)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if op == model.Withdraw {
+			return 0, ErrInsufficientFunds
+		}
+		return 0, ErrNotFound
 	}
-
-	if err = tx.Commit(ctx); err != nil {
-		return 0, err
-	}
-	return newBal, nil
-}
-
-func isSerializationErr(err error) bool {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.SQLState() == "40001"
-	}
-	return false
+	return bal, err
 }
