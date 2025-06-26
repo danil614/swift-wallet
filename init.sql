@@ -1,0 +1,13 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS wallets
+(
+    id         UUID PRIMARY KEY,
+    balance    BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP       DEFAULT now(),
+    updated_at TIMESTAMP       DEFAULT now()
+);
+
+INSERT INTO wallets(id, balance)
+VALUES ('11111111-1111-1111-1111-111111111111', 0)
+ON CONFLICT DO NOTHING;

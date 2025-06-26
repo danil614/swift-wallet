@@ -16,6 +16,7 @@ import (
 var (
 	ErrNotFound          = errors.New("wallet not found")
 	ErrInsufficientFunds = errors.New("insufficient funds")
+	ErrUnknownOperation  = errors.New("unknown operation")
 )
 
 const maxRetry = 5
@@ -82,7 +83,7 @@ func (r *repo) changeOnce(ctx context.Context, id uuid.UUID, op model.OperationT
 		}
 		newBal = current - amount
 	default:
-		return 0, errors.New("unknown operation")
+		return 0, ErrUnknownOperation
 	}
 
 	if _, err = tx.Exec(ctx,
