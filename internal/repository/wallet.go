@@ -8,8 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"swiftwallet/internal/model"
 )
 
@@ -26,9 +24,15 @@ type Repository interface {
 	ChangeBalance(ctx context.Context, id uuid.UUID, op model.OperationType, amount int64) (int64, error)
 }
 
-type repo struct{ db *pgxpool.Pool }
+type PgxIface interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
+}
 
-func New(db *pgxpool.Pool) Repository { return &repo{db: db} }
+type repo struct{ db PgxIface }
+
+func New(db PgxIface) Repository { return &repo{db: db} }
 
 func (r *repo) GetBalance(ctx context.Context, id uuid.UUID) (int64, error) {
 	var bal int64
